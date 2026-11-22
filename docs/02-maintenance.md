@@ -22,7 +22,7 @@ The scripts are in [`Maintenance/`](../Maintenance/).
 | Script | Runs from | Installed at | What it does |
 |---|---|---|---|
 | [`routine-update`](../Maintenance/routine-update.sh) | Your stick, **Save changes** | `/usr/local/sbin` | Updates everything except the kernel, checks the boot image, and restores the backup boot image if the check fails. Reapplies the discard-mode fix after a live-boot update. Removes old kernels after a kernel update |
-| [`kernel-update`](../Maintenance/kernel-update.sh) | Your stick, **Save changes** | `/usr/local/sbin` | Installs the newest kernel and puts it on the stick in one go. If the new boot image fails its checks, it removes the new kernel and leaves the stick unchanged |
+| [`kernel-update`](../Maintenance/kernel-update.sh) | Your stick, **Save changes** | `/usr/local/sbin` | Installs the newest kernel and puts it on the stick in one go. If something fails, it tries to remove the new kernel and put the old boot files back, and reports exactly what it verified. It isn't a full transaction, so keep a full backup |
 
 ---
 
@@ -92,14 +92,14 @@ It refuses to run in Discard session changes mode, and after `kernel-update` unt
 |---|---|---|
 | **✅ Update complete. Safe to reboot.** | Everything updated, and the boot image on LIVE passed its checks | Reboot when you like |
 | **ℹ️ A newer kernel is available** | A kernel update is waiting. The rest of the update still completed | When convenient, [back up](#back-up-first) and do a [kernel update](#kernel-updates) |
-| **⚠️ live-boot was updated and the read-only fix no longer applies to it** | The new live-boot no longer has the line the patch changes. The script kept your current patched file, and the boot image passed its checks | It's safe to reboot. Before the next update, adapt the patch as in [step 6.2](01-build-the-stick.md#62-apply-the-discard-mode-fix) |
-| **❌ The new boot image failed its checks, so the backup was restored** | A rebuild broke the boot image. `initrd.img.good` is back in place | It's safe to reboot, but find out what went wrong before the next update |
+| **⚠️ live-boot was updated and the discard-mode patch no longer applies to it** | The new live-boot no longer has the line the patch changes. The script kept your current patched file, and the boot image passed its checks | It's safe to reboot. Before the next update, adapt the patch as in [step 6.2](01-build-the-stick.md#62-apply-the-discard-mode-fix) |
+| **❌ The new boot image failed its checks, so the backup boot image was restored** | A rebuild broke the boot image. `initrd.img.good` is back in place and passed the same checks | It's safe to reboot, but find out what went wrong before the next update |
 | **❌ … AND restoring the backup failed. DON'T REBOOT** | The boot image on LIVE may not unlock | Don't reboot. Restore `initrd.img.good` with the [command in step 9.4](01-build-the-stick.md#restore-good-initrd) and run the checks |
 | **❌ Discard-changes mode** or **❌ Saved storage isn't in use** | You're not in Save changes mode with your saved storage | Reboot into Save changes |
 | **❌ The stick has a different kernel than the one running** | You ran `kernel-update` and haven't rebooted yet | Reboot into Save changes first |
 | **❌ Kernel not held** | The kernel hold from [step 9.3](01-build-the-stick.md#93-protect-the-boot-image) is missing | Run the `apt-mark hold` command the message shows |
-| **❌ Backup boot image … is missing or unreadable** | `initrd.img.good` is gone or damaged | Fix this before you update. Don't update without a working backup boot image |
-| The script stops with an apt error and no ✅ or ❌ line | apt failed, and the script stopped before checking the boot image | **Don't reboot.** Run the checks from [step 9.4](01-build-the-stick.md#94-rebuild-and-check) by hand |
+| **❌ Backup boot image … is missing or failed its checks** | `initrd.img.good` is gone, damaged, or doesn't match the running kernel | Fix this before you update. Don't update without a working backup boot image |
+| **❌ routine-update stopped unexpectedly** | A command failed partway, for example apt, before the boot image was checked | **Don't reboot.** Run the checks from [step 9.4](01-build-the-stick.md#94-rebuild-and-check) by hand, and fix the error before updating again |
 
 ---
 
@@ -112,11 +112,23 @@ Do this when `routine-update` shows **ℹ️ A newer kernel is available**. The 
 > [!IMPORTANT]
 > **Make a full backup of the stick before every kernel update.** If the new kernel doesn't work, restoring that backup is your way back. `kernel-update` replaces `initrd.img.good` with the new kernel's boot image, because the backup boot image has to match the kernel on LIVE. After a kernel update, `initrd.img.good` can't take you back to the old kernel.
 
-Use a full system backup, or a backup tool of your choice, such as Timeshift. Whatever you use:
+The backup should be an image of the **whole stick**, made **offline**: from the installer stick, not from the stick itself. While your stick is running, its saved data keeps changing, so a copy made then can't be trusted. A whole-stick image covers everything you'd need to restore: the partition table, the EFI and LIVE partitions, and the complete encrypted partition, including its LUKS header.
 
-- **Make sure it can bring back a bootable stick.** The kernel and boot image the stick boots live on the LIVE partition, outside your saved system. A tool that only backs up files inside the running system may not cover them. This guide hasn't tested Timeshift on this setup.
-- **Keep the backup encrypted.** A file-level backup contains your saved system unencrypted, so store it on an encrypted drive.
-- **Remember the passphrase.** A backup of the whole stick unlocks with the passphrase the stick had when the backup was made.
+1. Boot the **installer stick**, with your stick and a backup drive plugged in. Don't unlock or mount your stick.
+2. In **Disks**, select your stick, the whole drive rather than a partition. Check its model and size.
+3. In the drive menu, choose **Create Disk Image…**, and save the image on the backup drive. The image is as big as the whole stick, so the backup drive needs at least that much free space.
+
+To restore, use **Restore Disk Image…** in the same menu, onto a stick at least as big as the original.
+
+> [!CAUTION]
+> **Restoring erases the stick you restore onto. Verify your target device twice:** check its model and size, and make sure it isn't the backup drive or the computer's internal disk.
+
+Good to know:
+
+- **The image stays encrypted where it matters.** The encrypted partition is copied as it is, so your saved data stays encrypted in the image. The EFI and LIVE partitions weren't encrypted to begin with.
+- **It unlocks with the passphrase the stick had when you made it.** Changing the stick's passphrase later doesn't change existing backups.
+- **A system-snapshot tool such as Timeshift isn't a substitute.** It won't normally cover the EFI and LIVE partitions or the LUKS header, which you need for a bootable stick, and it hasn't been tested on this live setup. Use it, if at all, in addition to a whole-stick image. A file-level backup of your saved system is unencrypted, so store it on an encrypted drive.
+- **Test a restore** onto a spare stick at least once, before you rely on your backups.
 
 ### Run the update
 
@@ -126,7 +138,7 @@ Use a full system backup, or a backup tool of your choice, such as Timeshift. Wh
    ```
    It asks whether you've made a fresh full backup of the stick. Type `YES` to continue.
 
-   **You should see:** `✅ The stick now boots <new version>`, and a list of next steps. If the new boot image fails its checks, the script removes the new kernel, and says the stick still boots the old one and that it's safe to reboot.
+   **You should see:** `✅ The stick now boots <new version>`, and a list of next steps. If something fails, the script tries to remove the new kernel and put the old boot files back. It then reports what it verified: that the old boot files are back and passed their checks, whether removing the new kernel package failed, or, if putting the old boot files back failed, that you mustn't reboot. If it says it stopped unexpectedly, don't reboot until the boot files have been checked.
 2. Reboot into **Save changes**. Check that `uname -r` shows the new version, and that Wi-Fi, sound and the display work.
 3. Reboot into **Discard session changes** and check that it starts. If it hangs on a black screen, see [Black screen after the passphrase](01-build-the-stick.md#black-screen-after-the-passphrase).
 4. Back in **Save changes**, run `sudo routine-update`. It removes the old kernel.

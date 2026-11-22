@@ -10,10 +10,12 @@ set -e
 LIVE=/run/live/medium/live
 MARK='patched: open read-write'
 
-fail() { echo -e "\n❌ $*"; exit 1; }
+REPORTED=""
+fail() { REPORTED=1; echo -e "\n❌ $*"; exit 1; }
 installed_kernels() { dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'linux-image-[0-9]*' 2>/dev/null | awk '$1 ~ /^[hi]i/ {print $2}'; }
 
-# check_initrd IMAGE VERSION: encryption support for that kernel + live system + read-only fix
+# check_initrd IMAGE VERSION: encryption support for that kernel + live system + discard-mode patch.
+# Structural checks only: they don't prove the image boots.
 check_initrd() {
     local img=$1 ver=$2 bad=0 list tmpd
     list=$(lsinitramfs "$img") || return 1
@@ -21,7 +23,7 @@ check_initrd() {
     grep -F "lib/modules/$ver/" <<< "$list" | grep -q 'dm-crypt\.ko' || { echo "  missing: dm-crypt for $ver"; bad=1; }
     grep -q 'scripts/live$' <<< "$list" || { echo "  missing: scripts/live"; bad=1; }
     tmpd=$(mktemp -d)
-    if unmkinitramfs "$img" "$tmpd" 2>/dev/null && grep -rqs "$MARK" "$tmpd"; then :; else echo "  missing: read-only fix"; bad=1; fi
+    if unmkinitramfs "$img" "$tmpd" 2>/dev/null && grep -rqs "$MARK" "$tmpd"; then :; else echo "  missing: discard-mode patch"; bad=1; fi
     rm -rf "$tmpd"
     return $bad
 }
@@ -33,7 +35,7 @@ findmnt -no OPTIONS / | grep -q 'upperdir=/run/live/persistence/' || fail "Saved
 OLD=$(uname -r)
 cmp -s "/boot/vmlinuz-$OLD" "$LIVE/vmlinuz" || fail "The stick's kernel isn't the one running. Reboot into 'Save changes' (and run routine-update) first."
 [ "$(installed_kernels | wc -l)" -eq 1 ] || fail "More than one kernel is installed. Run routine-update first; it removes old kernels."
-[ -s "$LIVE/initrd.img.good" ] || fail "Backup boot image $LIVE/initrd.img.good is missing."
+check_initrd "$LIVE/initrd.img.good" "$OLD" > /dev/null || fail "Backup boot image $LIVE/initrd.img.good is missing or failed its checks for $OLD. Fix this first."
 
 echo "Running kernel: $OLD"
 echo "If the new kernel doesn't work, restoring your full backup is the way back."
@@ -45,7 +47,16 @@ echo -e "\n📦 1/4: Installing the newest kernel..."
 apt-mark unhold linux-image-amd64 > /dev/null 2>&1 || true
 # However this script exits (success, failure or Ctrl+C), hold the kernel
 # metapackage again, so a later routine-update can't pull in a kernel by itself.
-trap 'apt-mark hold linux-image-amd64 > /dev/null 2>&1 || true' EXIT
+# If it stopped on an error it didn't report itself, say so.
+on_exit() {
+    local rc=$?
+    apt-mark hold linux-image-amd64 > /dev/null 2>&1 || true
+    if [ "$rc" -ne 0 ] && [ -z "$REPORTED" ]; then
+        echo -e "\n❌ kernel-update stopped unexpectedly (code $rc). The kernel update is incomplete."
+        echo "   DON'T REBOOT until you've checked that $LIVE/vmlinuz and initrd.img are a matching, working pair."
+    fi
+}
+trap on_exit EXIT
 apt-get update
 apt-get install -y linux-image-amd64
 NEW=$(installed_kernels | sed 's/^linux-image-//' | sort -V | tail -1)
@@ -56,16 +67,23 @@ if [ "$NEW" = "$OLD" ]; then
 fi
 echo "New kernel: $NEW"
 
-# Undo the install if something fails before the stick is changed.
+# Try to undo the install if something fails. This isn't a full transaction:
+# it only reports success for the steps it has actually verified.
 rollback() {
-    echo -e "\nRemoving the new kernel; the stick keeps $OLD..."
-    apt-get purge -y "linux-image-$NEW" || true
-    mount -o remount,rw /run/live/medium || true
+    set +e
+    local removed=1
+    echo -e "\nRemoving the new kernel and putting $OLD's boot files back..."
+    apt-get purge -y "linux-image-$NEW" || removed=0
+    mount -o remount,rw /run/live/medium
     rm -f "$LIVE"/vmlinuz[0-9]* "$LIVE"/initrd[0-9]*.img "$LIVE"/vmlinuz.new "$LIVE"/initrd.img.new
     cmp -s "/boot/vmlinuz-$OLD" "$LIVE/vmlinuz" || cp "/boot/vmlinuz-$OLD" "$LIVE/vmlinuz"
     check_initrd "$LIVE/initrd.img" "$OLD" > /dev/null || cp "$LIVE/initrd.img.good" "$LIVE/initrd.img"
     sync
-    fail "$1 The new kernel was removed and the stick still boots $OLD. It's safe to reboot."
+    if ! cmp -s "/boot/vmlinuz-$OLD" "$LIVE/vmlinuz" || ! check_initrd "$LIVE/initrd.img" "$OLD" > /dev/null; then
+        fail "$1 Putting $OLD's boot files back FAILED. DON'T REBOOT: restore your full backup, or get help."
+    fi
+    [ "$removed" -eq 1 ] || fail "$1 The stick's boot files are back to $OLD and passed their checks, but removing the new kernel package failed. Run routine-update after rebooting; it removes it."
+    fail "$1 The new kernel was removed, and the stick's boot files are back to $OLD and passed their checks."
 }
 
 # --- Check the new kernel's boot image ---
@@ -73,7 +91,7 @@ echo -e "\n🔐 2/4: Checking the new boot image..."
 B=/boot/initrd.img-$NEW
 if ! check_initrd "$B" "$NEW"; then
     echo "Rebuilding it once..."
-    update-initramfs -u -k "$NEW"
+    update-initramfs -u -k "$NEW" || true
     check_initrd "$B" "$NEW" || rollback "The new kernel's boot image failed its checks."
 fi
 echo "  boot image OK"
@@ -89,7 +107,8 @@ if ! cmp -s "/boot/vmlinuz-$NEW" "$LIVE/vmlinuz" || ! cmp -s "$B" "$LIVE/initrd.
     cp "/boot/vmlinuz-$OLD" "$LIVE/vmlinuz" ; cp "$LIVE/initrd.img.good" "$LIVE/initrd.img" ; sync
     rollback "Swapping in the new kernel failed."
 fi
-cp "$LIVE/initrd.img" "$LIVE/initrd.img.good" && sync
+# Stage the new backup boot image first, so an interrupted copy can't leave a broken one.
+cp "$LIVE/initrd.img" "$LIVE/initrd.img.good.new" && sync && mv "$LIVE/initrd.img.good.new" "$LIVE/initrd.img.good" && sync
 rm -f "$LIVE"/vmlinuz[0-9]* "$LIVE"/initrd[0-9]*.img
 
 # --- Holds: keep the new kernel, let routine-update remove the old one ---

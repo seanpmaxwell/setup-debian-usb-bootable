@@ -29,7 +29,7 @@ When you finish, continue with [Maintenance](02-maintenance.md) for routine upda
 - **Two USB sticks:**
   - **Installer stick:** 8 GB or more. It will be erased.
   - **Target stick:** 32 GB or more. 64–128 GB gives plenty of room for saved apps and files. It will be erased. A fast USB 3 stick makes a big difference.
-- **A 64-bit PC with UEFI firmware.** Secure Boot can stay on.
+- **A 64-bit (x86-64) PC with UEFI firmware.** Secure Boot can usually stay on. It needs the firmware to trust Microsoft's third-party UEFI certificate, which Debian's shim is signed with. Some newer PCs turn that off by default; look for a firmware option such as "Allow Microsoft 3rd Party UEFI CA".
 - **An internet connection** during setup.
 - **The Debian 13 GNOME Live ISO for amd64** from <https://www.debian.org/CD/live/>. Use the *live* image, not netinst.
 - **A tool to write the ISO:** Rufus on Windows (in DD mode), or `dd` on Linux.
@@ -55,9 +55,12 @@ You paste commands into GNOME Terminal.
 ### The boot chain
 
 ```text
-UEFI firmware ─► shim (Debian-signed) ─► GRUB (Debian-signed) ─► kernel + boot image ─► live-boot
-                                          two menu entries         from the LIVE           asks for the passphrase,
-                                                                   partition               assembles the system
+UEFI firmware
+  └─► shim: Debian's, signed by Microsoft's third-party UEFI CA        (EFI partition)
+        └─► GRUB: signed by Debian, shows the two menu entries          (EFI partition)
+              └─► kernel: signed by Debian                              (LIVE partition)
+                  + boot image (initrd): rebuilt by you, NOT signed     (LIVE partition)
+                    └─► live-boot asks for the passphrase and assembles the system
 ```
 
 ### Disk layout of the target stick
@@ -84,7 +87,7 @@ The only difference between the two boot entries is one word on the kernel comma
 
 **1. The stock boot image can't unlock encryption.** Debian's live-boot supports encrypted persistence (`persistence-encryption=luks`). But recent official live images ship a boot image (initrd) without `cryptsetup` or the `dm-crypt` module. You check yours in [step 6](#61-check-the-stock-boot-image). If it's missing them, you build a replacement that includes them.
 
-**2. Discard mode can silently boot a blank system.** Your whole system runs from the persistence partition, so it often isn't fully unmounted at shutdown. That leaves its ext4 journal with unfinished writes. In discard mode, live-boot unlocks the partition with `cryptsetup --readonly`, so the kernel can't finish those writes. The mount fails, and live-boot quietly boots the plain system *without* your saved data.
+**2. Discard mode can silently boot a blank system.** Your saved changes on the persistence partition are in use for as long as the system runs, so the partition often isn't fully unmounted at shutdown. That leaves its ext4 journal with unfinished writes. In discard mode, live-boot unlocks the partition with `cryptsetup --readonly`, so the kernel can't finish those writes. The mount fails, and live-boot quietly boots the plain system *without* your saved data.
 
 A one-line patch to live-boot removes `--readonly`. The filesystem is still **mounted** read-only. The kernel finishes the pending writes, which your last Save changes session had already committed, and then writes nothing more.
 
@@ -92,7 +95,7 @@ The trade-off: discard mode may complete leftover writes from your previous Save
 
 ### Why some files exist in two places
 
-The stick only boots the `vmlinuz` and `initrd.img` on the **LIVE** partition. The firmware needs them before the system exists. They must also sit outside the encryption, because the boot image is what unlocks it.
+The stick only boots the `vmlinuz` and `initrd.img` on the **LIVE** partition. GRUB loads them before the system is assembled. They must also sit outside the encryption, because the boot image is what unlocks it.
 
 Inside your system, Debian's tools work in `/boot` as usual. Debian's live tools copy rebuilt boot images from `/boot` onto LIVE automatically, but they **don't** copy a new kernel. That's why you hold the kernel in [step 9](#93-protect-the-boot-image), and why [kernel updates](02-maintenance.md#kernel-updates) are a separate, deliberate job.
 
@@ -108,15 +111,16 @@ You write the Debian Live ISO to the installer stick. You boot from it to build 
    > [!CAUTION]
    > **This erases the device you select. Verify your target device twice.** Check its size and model, then check again just before you start writing. Choosing the wrong device here can wipe your computer's internal disk.
 
-   - **Windows (Rufus):** select the stick and the ISO, choose GPT and UEFI (non-CSM), click Start, and choose **DD mode** if asked.
+   - **Windows (Rufus):** select the stick and the ISO, click Start, and choose **DD mode** if asked. DD mode writes the ISO's own partition layout, so the partition scheme setting doesn't matter.
    - **Linux:** first identify the stick by its size and model:
      ```bash
      lsblk -o NAME,SIZE,MODEL,FSTYPE,LABEL
      ```
-     Then run this, replacing `/dev/sdX` with the installer stick:
+     Then run this, replacing `/path/to/debian-live.iso` with the exact path of the ISO you downloaded, and `/dev/sdX` with the whole installer stick (not one of its partitions, such as `sdX1`):
      ```bash
-     sudo dd if=debian-live-13*-amd64-gnome.iso of=/dev/sdX bs=4M status=progress conv=fsync
+     sudo dd if=/path/to/debian-live.iso of=/dev/sdX bs=4M status=progress conv=fsync
      ```
+     Don't use a wildcard such as `debian-live-13*.iso` here: the shell doesn't expand it after `if=`, so `dd` can't find the file.
 3. Eject it safely.
 
 **You should see:** `dd` ends with a summary of bytes copied, or Rufus says it's ready.
@@ -177,7 +181,7 @@ Open Terminal:
 lsblk -o NAME,SIZE,MODEL,FSTYPE,LABEL
 ```
 
-Find the target stick. It has three partitions: `…1` vfat `EFI`, `…2` ext4 `LIVE`, and `…3` crypto_LUKS with an ext4 `persistence` inside it. `lsblk` shows sizes in GiB, so a "128 GB" stick appears as about 115G.
+Find the target stick. It has three partitions: `…1` vfat `EFI`, `…2` ext4 `LIVE`, and `…3` crypto_LUKS with an ext4 `persistence` inside it. `lsblk` shows sizes in GiB, so a stick sold as "128 GB" appears as about 115–119G, depending on the stick.
 
 Set `DEV` to the target stick, **replacing `sdX`**, and check that it isn't the installer stick:
 
@@ -436,11 +440,14 @@ sudo apt install -y systemd-timesyncd && sudo timedatectl set-ntp true
 
 Set your time zone in **Settings → System → Date & Time**.
 
-If the PC also runs Windows, keep the hardware clock in local time, so that both systems agree:
+**Optional, for a PC that also runs Windows:** Windows usually keeps the hardware clock in local time, and Linux expects UTC. To make the stick use local time, so that both agree:
 
 ```bash
 sudo timedatectl set-local-rtc 1 --adjust-system-clock
 ```
+
+> [!WARNING]
+> This setting is saved on the stick, so it applies on **every** PC you boot it on. On a PC that keeps its hardware clock in UTC, the stick then starts with the wrong time until time sync corrects it. If you use the stick on several computers, skip this.
 
 ### 9.3 Protect the boot image
 
@@ -622,8 +629,8 @@ grep -qw persistence-read-only /proc/cmdline && echo "DISCARD mode" || echo "SAV
 
 - **To keep anything from a discard session,** copy it somewhere else before you shut down, for example to another drive. Otherwise it's gone.
 - **To keep a setting you tried in discard mode,** reboot into Save changes and set it again there.
-- **Run updates only in Save changes mode.** In discard mode they're thrown away at shutdown.
-- **Know its limits.** Discard mode doesn't stop writes to other drives, isn't a barrier against anyone with sudo, and doesn't undo anything sent over the network. See [What this does and doesn't protect against](../README.md#what-this-does-and-doesnt-protect-against).
+- **Install and update packages only in Save changes mode.** In discard mode, changes to the system are thrown away at shutdown, but an update can still rewrite the boot image on LIVE, which sits outside the disposable layer. That can leave the boot files out of step with your saved system.
+- **Know its limits.** Discard mode isn't a sandbox: everything you run can read your saved files and use your signed-in accounts. It also doesn't stop writes to other drives, isn't a barrier against anyone with sudo, and doesn't undo anything sent over the network. See [What this does and doesn't protect against](../README.md#what-this-does-and-doesnt-protect-against).
 
 ### Updating
 
@@ -656,7 +663,7 @@ When packages update, the old versions stay in the read-only base image and the 
 |---|---|---|
 | No passphrase prompt, and a fresh system (welcome tour) in both modes | The boot image lacks encryption support, usually because an update rebuilt it before step 9 was done | Restore `initrd.img.good` ([step 9.4](#restore-good-initrd)). If the stick won't boot, boot the installer stick, mount the target's LIVE partition, and copy `live/initrd.img.good` over `live/initrd.img` |
 | Save changes works, but discard mode shows a fresh system after the passphrase | The discard-mode fix is missing from the boot image | Reapply the patch and rebuild ([Reapplying the patch](02-maintenance.md#reapplying-the-patch-after-a-live-boot-update)), then run the checks |
-| Black screen after the passphrase, usually in discard mode on the first boot after an update | Often a one-off hang | See [Black screen after the passphrase](#black-screen-after-the-passphrase) below |
+| Black screen after the passphrase, usually in discard mode on the first boot after an update | Unknown. It has happened once, and the second boot worked | See [Black screen after the passphrase](#black-screen-after-the-passphrase) below |
 | `grub>` prompt instead of the menu | GRUB can't find `grub.cfg` | Check that both copies exist on the EFI partition: `EFI/debian/grub.cfg` and `EFI/BOOT/grub.cfg` |
 | "Verification failed" with Secure Boot on | Wrong boot loader files | Repeat [step 7.4](#74-install-the-boot-loader) with the `.signed` files from 7.1 |
 | `upperdir` is under `/run/live/overlay` in Save changes mode | The system started without your saved storage | Check the first two rows. If the journal is unfinished, see [Finish an unfinished journal by hand](#finish-an-unfinished-journal-by-hand) |
@@ -670,7 +677,8 @@ This has happened once, in discard mode, on the first boot after an update.
    ```bash
    systemctl --failed --no-pager ; journalctl -b -p err --no-pager | tail -25
    ```
-2. Otherwise, hold the power button and boot again. That's safe in discard mode. Last time, the second try worked.
+2. If the text login works, try `sudo systemctl reboot` from there.
+3. If the machine doesn't respond at all, hold the power button and boot again. In discard mode this is low-risk, because your saved data is mounted read-only, but a forced power-off is never completely safe. Last time, the second try worked.
 
 ### Updates and packages
 

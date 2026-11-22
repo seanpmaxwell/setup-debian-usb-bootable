@@ -8,7 +8,7 @@ This tutorial builds a portable **Debian 13 (Trixie) GNOME Live USB**. It has an
 | Starts from your saved apps, settings and files | Yes | Yes |
 | Keeps what you do in this session | Yes | **No.** Everything is forgotten at shutdown |
 
-It boots with **Secure Boot** on, using Debian's own signed shim and GRUB, so there are no keys to enroll on each PC. It updates itself from inside the running system, and it comes with scripts for safe routine updates and kernel updates.
+It boots with **Secure Boot** on, using Debian's signed boot loader (shim and GRUB), so on most PCs there are no keys to enroll. It updates itself from inside the running system, and it comes with scripts for safe routine updates and kernel updates.
 
 ---
 
@@ -36,7 +36,7 @@ Ready-made tools already cover parts of this. This section explains what the bui
 
 1. **Encrypt everything you save.** Your installed apps, settings and files live on a LUKS-encrypted partition on a stick you carry around. If the stick is lost, nothing you saved can be read without the passphrase.
 2. **A disposable session that still starts from your saved system.** You don't get a blank, generic system. You get your own setup, and nothing from that session is kept.
-3. **Secure Boot on any PC, with nothing to enroll.** You plug the stick into an unfamiliar machine with Secure Boot on, and it boots.
+3. **Secure Boot without enrolling keys.** You plug the stick into an unfamiliar UEFI PC with Secure Boot on, and it boots. This works on PCs whose firmware trusts Microsoft's third-party UEFI certificate, which Debian's shim is signed with. Most do, but some newer PCs turn that trust off by default.
 4. **Updates from the stick itself.** You update packages, and when you choose to, the kernel, from inside the running system. You don't rebuild an image on another computer.
 
 ### Why not Kicksecure
@@ -61,7 +61,7 @@ Ready-made tools already cover parts of this. This section explains what the bui
 
 **Why this build uses Debian Live instead:**
 
-- **It's portable by design.** Debian Live is made to boot from a USB stick on whatever PC it's plugged into. Kicksecure's USB route is an installed system, and Kicksecure warns that a USB installed in BIOS mode "may only boot on computers using BIOS", and the same applies to UEFI ([USB Installation](https://www.kicksecure.com/wiki/USB_Installation)).
+- **It's portable by design.** Debian Live is made to boot from a USB stick on whatever PC it's plugged into. This build puts the boot loader at the standard UEFI removable-media path, so it doesn't depend on a boot entry stored in one computer's firmware. Kicksecure's USB route is an ordinary installed system instead.
 - **It's widely used.** Debian is one of the most popular Linux distributions, with plenty of documentation, help online, and people who know it. Kicksecure is a niche system aimed at security and opsec enthusiasts.
 - **It's general purpose and practical day to day.** Debian Live works out of the box as an everyday desktop. Kicksecure's hardened defaults cost setup time before the system is comfortable to use. For example, Bluetooth is disabled by default ([About](https://www.kicksecure.com/wiki/About)), and other defaults, such as Tor-routed updates and the account split, change how the system behaves every day.
 - **It works well on modern hardware.** Debian 13 ships a recent kernel and includes non-free firmware, which many modern Wi-Fi and graphics chips need.
@@ -100,7 +100,7 @@ This approach has real costs:
 | Intended use | One portable bare-metal stick | Hardened desktop OS: VMs, bare metal, USB install; base of Whonix | Booting many ISOs from one stick |
 | Encrypted saved data on the USB | Yes, a LUKS partition | Full disk encryption by default in the installer; not stated specifically for USB targets | Not documented: the persistence plugin uses an image file, and LUKS isn't mentioned |
 | Disposable session from your saved system | Yes, "Discard session changes" | Yes, grub-live "LIVE mode" | Not without a rebuilt initrd |
-| Secure Boot on any PC, no key enrollment | Yes, Debian's signed shim and GRUB | Yes, Microsoft keys; extra kernel modules need a MOK key | No, one-time key enrollment on each PC |
+| Secure Boot without key enrollment | Yes, on PCs that trust Microsoft's third-party UEFI certificate | Yes, Microsoft keys; extra kernel modules need a MOK key | No, one-time key enrollment on each PC |
 | Updates from the stick itself | Yes. Kernel updates are a separate, scripted job | Yes, an ordinary installed system | Packages yes, initrd changes no |
 | Hardening | Debian Live defaults, plus a few changes | Extensive by default | Whatever the ISO ships |
 | Many ISOs on one stick | No | No | **Yes**, its main strength |
@@ -124,8 +124,8 @@ This approach has real costs:
 
 - **One Debian system on the stick, with two ways to boot it.** Both boot menu entries use the same partitions. The only difference is where new changes go.
 - **Discard session changes** starts from everything you've saved, but sends this session's changes to RAM, so they vanish at shutdown. Use it for:
-  - **Amnesic sessions:** browsing, opening untrusted files, or lending the machine to someone, without leaving traces in your saved system.
-  - **Trying things safely:** testing settings, apps or updates. If you like the result, redo it in Save changes mode. If not, just reboot.
+  - **Amnesic sessions:** browsing or opening files without changing your saved system. Discard mode isn't a sandbox, though: see [what it doesn't protect against](#what-this-does-and-doesnt-protect-against).
+  - **Trying things safely:** testing settings or apps. If you like the result, redo it in Save changes mode. If not, just reboot. Don't test system updates this way: they can rewrite the boot files on LIVE, which sits outside the disposable layer.
 - **A boot image that can unlock encryption**, with a fix that stops discard mode from silently booting a blank system.
 - **Scripts** for safe routine updates and kernel updates.
 
@@ -133,7 +133,7 @@ How the pieces fit together, in brief:
 
 ```text
 UEFI firmware ─► shim ─► GRUB ─► kernel + rebuilt initrd ─► live-boot unlocks LUKS ─► overlay of:
-                 (Debian-signed)  (from the LIVE partition)                              your saved system (rw or ro)
+                 (signed boot chain) (from the LIVE partition)                           your saved system (rw or ro)
                                                                                          + Debian base (read-only)
 ```
 
@@ -151,13 +151,14 @@ The full explanation is in [How it works](docs/01-build-the-stick.md#2-how-it-wo
 **It doesn't protect against:**
 
 - **Anyone noticing the stick exists, or what's on it.** The EFI and LIVE partitions aren't encrypted. They openly contain a Debian live system and a boot menu, and the third partition is visibly a LUKS volume. Discard mode doesn't hide that the stick or your saved data exists.
-- **Tampering with the unencrypted partitions.** Secure Boot checks the boot loader and the kernel. The boot menu (`grub.cfg`) and the boot image (`initrd.img`) aren't signed. Someone with access to the stick could modify them, for example to capture your passphrase. This is the classic "evil maid" attack. Keep the stick with you.
+- **Tampering with the unencrypted partitions.** Secure Boot checks the boot loader and the kernel. The boot menu (`grub.cfg`), the boot image (`initrd.img`) and the Debian base system (`filesystem.squashfs`) aren't signed or checked. Someone with access to the stick could modify them, for example to capture your passphrase. This is the classic "evil maid" attack. Keep the stick with you.
 - **A compromised computer.** Malicious firmware, hardware keyloggers, or a compromised machine can see your passphrase and everything you do. Secure Boot doesn't defend against compromised firmware.
+- **Programs reading your saved data in a discard session.** Discard mode isn't a sandbox. Your saved files, and any accounts you're signed in to, are fully available to everything you run. Malware can steal data or use your accounts, even though its changes to the system disappear at shutdown. Don't open untrusted files, or lend the stick to someone, expecting discard mode to protect your private data.
 - **Someone with admin rights in a discard session.** Discard mode isn't a security barrier. Anyone with `sudo` can deliberately write to the encrypted partition or the boot files. It protects against *accidental* changes.
 - **Writes to other drives.** Discard mode only discards changes to the stick's own system. It doesn't stop writes to drives you mount, or to the computer's internal disk.
 - **Anything sent over the network.** Sign-ins, cloud uploads and the websites you visit are outside the stick, and aren't discarded.
 - **Leftover journal writes.** Discard mode can complete unfinished writes from your last Save changes session (see [Trade-offs](#trade-offs-of-this-approach)). It doesn't write anything new from the discard session itself.
-- **Unencrypted backups.** A file-level backup of your saved system is **unencrypted** unless you store it on an encrypted drive.
+- **Unencrypted backups.** A whole-stick image keeps the LUKS partition encrypted, but a file-level backup of your saved system is **unencrypted** unless you store it on an encrypted drive.
 - **A forgotten passphrase.** Without it, your saved data and its backups can't be recovered.
 
 ---
