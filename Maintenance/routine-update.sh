@@ -16,7 +16,8 @@ fail() { echo -e "\n❌ $*"; exit 1; }
 grep -qw persistence-read-only /proc/cmdline && fail "Discard-changes mode: updates would be lost. Reboot into 'Save changes'."
 findmnt -no OPTIONS / | grep -q 'upperdir=/run/live/persistence/' || fail "Saved storage isn't in use, so updates would be lost. Reboot into 'Save changes'."
 cmp -s "/boot/vmlinuz-$(uname -r)" /run/live/medium/live/vmlinuz || fail "The stick has a different kernel than the one running (after kernel-update?). Reboot into 'Save changes' first."
-apt-mark showhold | grep -qx "linux-image-$(uname -r)" || fail "Kernel not held. Run: sudo apt-mark hold linux-image-amd64 linux-image-$(uname -r)"
+HOLDS=$(apt-mark showhold)
+{ grep -qx "linux-image-$(uname -r)" <<< "$HOLDS" && grep -qx linux-image-amd64 <<< "$HOLDS"; } || fail "Kernel not held. Run: sudo apt-mark hold linux-image-amd64 linux-image-$(uname -r)"
 [ -s "$LIVE_INITRD" ] || fail "Boot image $LIVE_INITRD is missing."
 { [ -s "$BACKUP_INITRD" ] && lsinitramfs "$BACKUP_INITRD" >/dev/null 2>&1; } || fail "Backup boot image $BACKUP_INITRD is missing or unreadable. Fix this before updating."
 
@@ -76,7 +77,7 @@ echo "  boot image OK (encryption support + read-only fix)"
 INST=$(dpkg-query -W -f='${Version}' linux-image-amd64 2>/dev/null || true)
 CAND=$(apt-cache policy linux-image-amd64 | awk '/Candidate:/{print $2}')
 if [ -n "$CAND" ] && [ "$INST" != "$CAND" ]; then
-    echo -e "\nℹ️  A newer kernel is available (${INST:-none} → $CAND). To install it: run backup-stick.sh from the installer stick, then: sudo kernel-update"
+    echo -e "\nℹ️  A newer kernel is available (${INST:-none} → $CAND). To install it: make a full backup of the stick, then: sudo kernel-update"
 fi
 
 if [ -n "$WARN" ]; then

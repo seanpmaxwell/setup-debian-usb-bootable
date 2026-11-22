@@ -2,7 +2,7 @@
 # kernel-update - put the newest Debian kernel on the encrypted Debian Live USB.
 # Install as /usr/local/sbin/kernel-update and run with:  sudo kernel-update
 #
-# Make a backup with backup-stick.sh first: restoring it is the way back if the
+# Make a full backup of the stick first: restoring it is the way back if the
 # new kernel doesn't work. The old kernel package is removed by the next run of
 # routine-update, after you've rebooted into the new kernel.
 set -e
@@ -36,13 +36,16 @@ cmp -s "/boot/vmlinuz-$OLD" "$LIVE/vmlinuz" || fail "The stick's kernel isn't th
 [ -s "$LIVE/initrd.img.good" ] || fail "Backup boot image $LIVE/initrd.img.good is missing."
 
 echo "Running kernel: $OLD"
-echo "If the new kernel doesn't work, restoring your backup (restore-stick.sh) is the way back."
-read -rp "Have you made a fresh backup with backup-stick.sh? Type YES to continue: " a
+echo "If the new kernel doesn't work, restoring your full backup is the way back."
+read -rp "Have you made a fresh full backup of the stick? Type YES to continue: " a
 [ "$a" = YES ] || fail "Cancelled. Nothing was changed."
 
 # --- Install the new kernel ---
 echo -e "\n📦 1/4: Installing the newest kernel..."
 apt-mark unhold linux-image-amd64 > /dev/null 2>&1 || true
+# However this script exits (success, failure or Ctrl+C), hold the kernel
+# metapackage again, so a later routine-update can't pull in a kernel by itself.
+trap 'apt-mark hold linux-image-amd64 > /dev/null 2>&1 || true' EXIT
 apt-get update
 apt-get install -y linux-image-amd64
 NEW=$(installed_kernels | sed 's/^linux-image-//' | sort -V | tail -1)
@@ -100,4 +103,4 @@ echo "Next:"
 echo "  1. Reboot into 'Save changes' and check Wi-Fi, sound and the display."
 echo "  2. Reboot into 'Discard session changes' and check it starts."
 echo "  3. Back in 'Save changes', run: sudo routine-update  (it removes the old kernel)."
-echo "If something is wrong, restore your backup with restore-stick.sh from the installer stick."
+echo "If something is wrong, restore your full backup."

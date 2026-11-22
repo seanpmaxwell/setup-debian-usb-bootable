@@ -2,7 +2,7 @@
 
 This guide takes you from two blank USB sticks to a working, tested, updatable Debian 13 Live stick with encrypted persistence and two boot modes. For why it's built this way, see the [README](../README.md#why-this-approach).
 
-When you finish, continue with [Maintenance](02-maintenance.md) for updates, backups and kernel upgrades.
+When you finish, continue with [Maintenance](02-maintenance.md) for routine updates and kernel upgrades.
 
 ---
 
@@ -100,7 +100,7 @@ Inside your system, Debian's tools work in `/boot` as usual. Debian's live tools
 
 ## 3. Make the installer stick
 
-You write the Debian Live ISO to the installer stick. You boot from it to build the target stick, and you keep it afterwards as your rescue and backup stick.
+You write the Debian Live ISO to the installer stick. You boot from it to build the target stick, and you keep it afterwards as your rescue stick.
 
 1. Insert the **installer stick** only.
 2. Write the ISO to it.
@@ -706,4 +706,4 @@ sudo cryptsetup open /dev/sdX3 persistfix && sudo e2fsck -f -p /dev/mapper/persi
 
 ### Forgotten encryption passphrase
 
-The saved system can't be recovered. Start again from [step 5](#5-partition-the-target-stick), or [restore a backup](02-maintenance.md#restoring-a-backup). A backup unlocks with the passphrase the stick had when the backup was made.
+The saved system can't be recovered. Start again from [step 5](#5-partition-the-target-stick), or restore a full backup if you have one ([Back up first](02-maintenance.md#back-up-first)). A backup of the whole stick unlocks with the passphrase the stick had when the backup was made.

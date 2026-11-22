@@ -8,7 +8,7 @@ This tutorial builds a portable **Debian 13 (Trixie) GNOME Live USB**. It has an
 | Starts from your saved apps, settings and files | Yes | Yes |
 | Keeps what you do in this session | Yes | **No.** Everything is forgotten at shutdown |
 
-It boots with **Secure Boot** on, using Debian's own signed shim and GRUB, so there are no keys to enroll on each PC. It updates itself from inside the running system, and it comes with scripts for safe updates, kernel updates, backup and restore.
+It boots with **Secure Boot** on, using Debian's own signed shim and GRUB, so there are no keys to enroll on each PC. It updates itself from inside the running system, and it comes with scripts for safe routine updates and kernel updates.
 
 ---
 
@@ -54,36 +54,33 @@ Ready-made tools already cover parts of this. This section explains what the bui
 
 **What Kicksecure does better than this build:**
 
-- **Hardening.** This build is stock Debian GNOME with a few changes: passwordless sudo removed, automatic login off, and an optional separate admin account. Kicksecure's hardening goes much further.
+- **Hardening.** This build is Debian Live GNOME with a few changes: passwordless sudo removed, automatic login off, and an optional separate admin account. Kicksecure's hardening goes much further.
 - **No custom patches to maintain.** This build depends on a patched live-boot script and a rebuilt boot image. Kicksecure's LIVE mode is maintained by its developers.
 - **Ordinary kernel updates.** An installed Kicksecure system updates its kernel like any Debian install. On this build, kernel updates are a deliberate, separate job.
 - **A more careful live mode.** grub-live also remounts other writable filesystems read-only ([grub-live](https://www.kicksecure.com/wiki/Grub-live)).
 
-**Where this build differs:**
+**Why this build uses Debian Live instead:**
 
-- **You stay on plain Debian GNOME,** with Debian's defaults. Kicksecure's defaults, such as Tor-routed updates and its account split, change how the system behaves day to day.
+- **It's portable by design.** Debian Live is made to boot from a USB stick on whatever PC it's plugged into. Kicksecure's USB route is an installed system, and Kicksecure warns that a USB installed in BIOS mode "may only boot on computers using BIOS", and the same applies to UEFI ([USB Installation](https://www.kicksecure.com/wiki/USB_Installation)).
+- **It's widely used.** Debian is one of the most popular Linux distributions, with plenty of documentation, help online, and people who know it. Kicksecure is a niche system aimed at security and opsec enthusiasts.
+- **It's general purpose and practical day to day.** Debian Live works out of the box as an everyday desktop. Kicksecure's hardened defaults cost setup time before the system is comfortable to use. For example, Bluetooth is disabled by default ([About](https://www.kicksecure.com/wiki/About)), and other defaults, such as Tor-routed updates and the account split, change how the system behaves every day.
+- **It works well on modern hardware.** Debian 13 ships a recent kernel and includes non-free firmware, which many modern Wi-Fi and graphics chips need.
+- **GNOME looks nice.** The Debian Live GNOME image gives you a polished, modern desktop.
 - **You control and understand every piece.** The whole build is a handful of commands that you can read in this tutorial.
-- **Portability across PCs isn't documented for Kicksecure.** Kicksecure warns that a USB installed in BIOS mode "may only boot on computers using BIOS", and the same applies to UEFI ([USB Installation](https://www.kicksecure.com/wiki/USB_Installation)). This build is UEFI-only by design.
 
 > [!NOTE]
-> This guide hasn't tested an encrypted Kicksecure USB installation with LIVE mode. Based on Kicksecure's documentation, it looks like a reasonable alternative. If you want hardening more than control, try it first.
+> This guide hasn't tested an encrypted Kicksecure USB installation with LIVE mode. Based on Kicksecure's documentation, it looks like a reasonable alternative. If you want hardening more than convenience, try it first.
 
 ### Why not Ventoy
 
-[Ventoy](https://www.ventoy.net/) puts many ISO files on one stick and boots any of them from a menu. That's very convenient, but it doesn't fit this build:
+[Ventoy](https://www.ventoy.net/) boots many ISO files from one stick. It's great for that, but it doesn't fit this build:
 
-1. **The boot image has to be replaced, and Ventoy boots the ISO's own.** Debian 13's stock live boot image (initrd) lacks `cryptsetup` and `dm-crypt`, so it can't unlock encryption ([How it works](docs/01-build-the-stick.md#two-things-this-tutorial-works-around)). This build depends on a rebuilt initrd. Ventoy's Boot Conf Replace plugin can only replace configuration files inside the ISO, such as `grub.cfg` or `isolinux.cfg`, and it doesn't modify the ISO ([Boot Conf Replace](https://www.ventoy.net/en/plugin_bootconf_replace.html)). That leaves two options:
-   - **Rebuild the ISO** with your own initrd swapped in. This works, but you'd have to repeat it every time the initrd changes.
-   - **Use Ventoy's injection plugin.** It extracts an archive of files into the initramfs at boot ([Injection plugin](https://www.ventoy.net/en/plugin_injection.html)). In theory, you could inject `cryptsetup`, its libraries, the kernel module and the patched script. In practice, that's fragile, and you'd be trusting it with the only copy of your data.
-2. **The discard-mode fix also lives in the boot image.** The one-line live-boot patch has to be built into the initrd, so it runs into the same problem.
-3. **Updates rewrite the boot image, and they can't reach the ISO.** On this stick, Debian's live tools copy each rebuilt initrd onto the writable LIVE partition, where you check it before rebooting. Under Ventoy, the system boots from a read-only ISO file. Package updates would still be saved to persistence, but initrd rebuilds would never reach the boot path. You'd be back to rebuilding the ISO by hand.
-4. **Secure Boot needs a key enrollment on each PC.** Ventoy supports Secure Boot, but on each new computer you enroll Ventoy's key once, in a blue key-manager screen. Some machines also need "Allow Microsoft 3rd Party UEFI CA" turned on in the firmware. Ventoy 1.1.13 and later need a new key enrolled because of the Microsoft UEFI CA 2023 change ([Secure Boot](https://www.ventoy.net/en/doc_secure.html)). For a stick you carry between PCs, that's a real cost.
-5. **Encrypted persistence is undocumented.** Ventoy's persistence plugin uses an image file, ext4 by default, with a filesystem label. Its documentation doesn't mention LUKS, and Debian isn't on its tested list. Debian appears only in a note about needing a `persistence.conf` file ([Persistence plugin](https://www.ventoy.net/en/plugin_persistence.html)). This build uses a real LUKS partition, which is the setup Debian's live-boot is designed for.
+- **It boots the ISO's own boot image, which can't unlock encryption.** This build depends on a rebuilt initrd with `cryptsetup`, `dm-crypt` and the discard-mode fix (see [How it works](docs/01-build-the-stick.md#two-things-this-tutorial-works-around)). Ventoy's plugins can replace the ISO's menu files or inject extra files at boot, but neither replaces the initrd ([Boot Conf Replace](https://www.ventoy.net/en/plugin_bootconf_replace.html), [Injection](https://www.ventoy.net/en/plugin_injection.html)). In practice, you'd rebuild the ISO every time the initrd changes.
+- **Updates can't reach the boot image.** On this stick, rebuilt initrds land on the writable LIVE partition. Under Ventoy, the system boots from a read-only ISO file.
+- **Secure Boot needs a key enrolled on each PC** before the stick will boot there ([Secure Boot](https://www.ventoy.net/en/doc_secure.html)).
+- **Encrypted persistence isn't documented.** Ventoy's persistence plugin uses an image file, and its documentation doesn't mention LUKS ([Persistence plugin](https://www.ventoy.net/en/plugin_persistence.html)).
 
-> [!NOTE]
-> **Not confirmed in Ventoy's docs:** points 1–3 assume that Ventoy loads the kernel and initrd from inside the ISO, and that injection can't replace the initrd. That's how Ventoy is generally understood to work, but its documentation doesn't say so directly.
-
-**When Ventoy is the better choice:** when you want **many ISOs on one stick**, for installers, rescue tools and trying out distributions. You can also have both. Ventoy can reserve space at the end of the disk, and you can create your own partitions there ([Disk layout](https://www.ventoy.net/en/doc_disk_layout.html)). You could put this build's three partitions in that space. This guide doesn't cover that setup. In practice, two sticks is simpler.
+**Ventoy is the better choice** if you want many ISOs on one stick, for installers, rescue tools or trying out distributions.
 
 ### Trade-offs of this approach
 
@@ -105,15 +102,15 @@ This approach has real costs:
 | Disposable session from your saved system | Yes, "Discard session changes" | Yes, grub-live "LIVE mode" | Not without a rebuilt initrd |
 | Secure Boot on any PC, no key enrollment | Yes, Debian's signed shim and GRUB | Yes, Microsoft keys; extra kernel modules need a MOK key | No, one-time key enrollment on each PC |
 | Updates from the stick itself | Yes. Kernel updates are a separate, scripted job | Yes, an ordinary installed system | Packages yes, initrd changes no |
-| Hardening | Stock Debian, plus a few changes | Extensive by default | Whatever the ISO ships |
+| Hardening | Debian Live defaults, plus a few changes | Extensive by default | Whatever the ISO ships |
 | Many ISOs on one stick | No | No | **Yes**, its main strength |
 | Setup effort | High | Moderate, installer-driven | Low for ISOs; high for this goal |
-| Control over the system | Full; plain Debian GNOME | Kicksecure's defaults and choices | Limited by the ISO and the plugins |
+| Control over the system | Full; Debian Live GNOME | Kicksecure's defaults and choices | Limited by the ISO and the plugins |
 
 ### Is this for you?
 
 > [!TIP]
-> **Follow this tutorial if** you want plain Debian GNOME on a stick you carry between UEFI PCs, with encrypted persistence and a disposable mode. You should be comfortable pasting commands into a terminal and checking their output, and willing to keep a simple update routine.
+> **Follow this tutorial if** you want Debian Live GNOME on a stick you carry between UEFI PCs, with encrypted persistence and a disposable mode. You should be comfortable pasting commands into a terminal and checking their output, and willing to keep a simple update routine.
 >
 > **Look elsewhere if:**
 > - You want a hardened system out of the box: try [Kicksecure](https://www.kicksecure.com/wiki/USB_Installation).
@@ -130,7 +127,7 @@ This approach has real costs:
   - **Amnesic sessions:** browsing, opening untrusted files, or lending the machine to someone, without leaving traces in your saved system.
   - **Trying things safely:** testing settings, apps or updates. If you like the result, redo it in Save changes mode. If not, just reboot.
 - **A boot image that can unlock encryption**, with a fix that stops discard mode from silently booting a blank system.
-- **Scripts** for safe routine updates, kernel updates, full backups and restores.
+- **Scripts** for safe routine updates and kernel updates.
 
 How the pieces fit together, in brief:
 
@@ -160,7 +157,7 @@ The full explanation is in [How it works](docs/01-build-the-stick.md#2-how-it-wo
 - **Writes to other drives.** Discard mode only discards changes to the stick's own system. It doesn't stop writes to drives you mount, or to the computer's internal disk.
 - **Anything sent over the network.** Sign-ins, cloud uploads and the websites you visit are outside the stick, and aren't discarded.
 - **Leftover journal writes.** Discard mode can complete unfinished writes from your last Save changes session (see [Trade-offs](#trade-offs-of-this-approach)). It doesn't write anything new from the discard session itself.
-- **Unencrypted backups.** A backup contains your saved system **unencrypted** inside the backup folder, so it must be kept on an encrypted drive. The maintenance guide sets one up.
+- **Unencrypted backups.** A file-level backup of your saved system is **unencrypted** unless you store it on an encrypted drive.
 - **A forgotten passphrase.** Without it, your saved data and its backups can't be recovered.
 
 ---
@@ -181,15 +178,13 @@ The full explanation is in [How it works](docs/01-build-the-stick.md#2-how-it-wo
    11. [Test both modes](docs/01-build-the-stick.md#11-test-both-modes)
    12. [Everyday use](docs/01-build-the-stick.md#12-everyday-use)
    13. [Troubleshooting](docs/01-build-the-stick.md#13-troubleshooting)
-2. **[Maintenance](docs/02-maintenance.md)**: updates, kernel updates, backup and restore.
+2. **[Maintenance](docs/02-maintenance.md)**: routine updates and kernel updates.
    1. [The scripts](docs/02-maintenance.md#the-scripts)
    2. [The update rule](docs/02-maintenance.md#the-update-rule)
-   3. [One-time setup](docs/02-maintenance.md#one-time-setup)
+   3. [Install the scripts](docs/02-maintenance.md#install-the-scripts)
    4. [Routine updates](docs/02-maintenance.md#routine-updates)
-   5. [Making a backup](docs/02-maintenance.md#making-a-backup)
-   6. [Kernel updates](docs/02-maintenance.md#kernel-updates)
-   7. [Restoring a backup](docs/02-maintenance.md#restoring-a-backup)
-   8. [Script status](docs/02-maintenance.md#script-status)
+   5. [Kernel updates](docs/02-maintenance.md#kernel-updates)
+   6. [Script status](docs/02-maintenance.md#script-status)
 
 The scripts are in [`Maintenance/`](Maintenance/).
 
