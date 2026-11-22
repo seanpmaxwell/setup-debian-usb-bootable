@@ -630,7 +630,7 @@ grep -qw persistence-read-only /proc/cmdline && echo "DISCARD mode" || echo "SAV
 - **To keep anything from a discard session,** copy it somewhere else before you shut down, for example to another drive. Otherwise it's gone.
 - **To keep a setting you tried in discard mode,** reboot into Save changes and set it again there.
 - **Install and update packages only in Save changes mode.** In discard mode, changes to the system are thrown away at shutdown, but an update can still rewrite the boot image on LIVE, which sits outside the disposable layer. That can leave the boot files out of step with your saved system.
-- **Know its limits.** Discard mode isn't a sandbox: everything you run can read your saved files and use your signed-in accounts. It also doesn't stop writes to other drives, isn't a barrier against anyone with sudo, and doesn't undo anything sent over the network. See [What this does and doesn't protect against](../README.md#what-this-does-and-doesnt-protect-against).
+- **Know its limits.** Discard mode isn't a sandbox: everything you run can read your saved files and use your signed-in accounts. It also doesn't stop writes to other drives, isn't a barrier against anyone with sudo, and doesn't undo anything sent over the network. See [What this does and doesn't protect against](#what-this-does-and-doesnt-protect-against).
 
 ### Updating
 
@@ -652,6 +652,26 @@ Update only in Save changes mode, and check the boot image before every reboot. 
 ### Disk space over time
 
 When packages update, the old versions stay in the read-only base image and the new versions are stored in your persistence partition. So the persistence partition slowly fills with replaced files. That's normal for a live system, and it's why the stick should be generously sized. Check usage with `df -h /`.
+
+### What this does and doesn't protect against
+
+**It protects:**
+
+- **Your saved data, if the stick is lost or stolen while it's switched off.** Everything you save is on the LUKS partition, and it's only as strong as your passphrase.
+- **Your saved system from accidental changes during a discard session.** You start every discard session from the same saved state.
+
+**It doesn't protect against:**
+
+- **Anyone noticing the stick exists, or what's on it.** The EFI and LIVE partitions aren't encrypted. They openly contain a Debian live system and a boot menu, and the third partition is visibly a LUKS volume. Discard mode doesn't hide that the stick or your saved data exists.
+- **Tampering with the unencrypted partitions.** Secure Boot checks the boot loader and the kernel. The boot menu (`grub.cfg`), the boot image (`initrd.img`) and the Debian base system (`filesystem.squashfs`) aren't signed or checked. Someone with access to the stick could modify them, for example to capture your passphrase. This is the classic "evil maid" attack. Keep the stick with you.
+- **A compromised computer.** Malicious firmware, hardware keyloggers, or a compromised machine can see your passphrase and everything you do. Secure Boot doesn't defend against compromised firmware.
+- **Programs reading your saved data in a discard session.** Discard mode isn't a sandbox. Your saved files, and any accounts you're signed in to, are fully available to everything you run. Malware can steal data or use your accounts, even though its changes to the system disappear at shutdown. Don't open untrusted files, or lend the stick to someone, expecting discard mode to protect your private data.
+- **Someone with admin rights in a discard session.** Discard mode isn't a security barrier. Anyone with `sudo` can deliberately write to the encrypted partition or the boot files. It protects against *accidental* changes.
+- **Writes to other drives.** Discard mode only discards changes to the stick's own system. It doesn't stop writes to drives you mount, or to the computer's internal disk.
+- **Anything sent over the network.** Sign-ins, cloud uploads and the websites you visit are outside the stick, and aren't discarded.
+- **Leftover journal writes.** Discard mode can complete unfinished writes from your last Save changes session (see [Two things this tutorial works around](#two-things-this-tutorial-works-around)). It doesn't write anything new from the discard session itself.
+- **Unencrypted backups.** A whole-stick image keeps the LUKS partition encrypted, but a file-level backup of your saved system is **unencrypted** unless you store it on an encrypted drive.
+- **A forgotten passphrase.** Without it, your saved data and its backups can't be recovered.
 
 ---
 
